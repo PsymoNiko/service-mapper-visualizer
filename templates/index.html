@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Mapper Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-section {
+            margin-bottom: 20px;
+        }
+
+        .control-section h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .form-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        input, select, button {
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        input, select {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .canvas-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        #serviceCanvas {
+            display: block;
+            cursor: grab;
+        }
+
+        #serviceCanvas:active {
+            cursor: grabbing;
+        }
+
+        .service-node {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .service-node:hover {
+            transform: scale(1.1);
+        }
+
+        .connection-line {
+            stroke: #00ff00;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 1000;
+        }
+
+        .message.success {
+            border-left: 4px solid #00ff00;
+        }
+
+        .message.error {
+            border-left: 4px solid #ff0000;
+        }
+
+        .service-list {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .service-badge {
+            background: #f0f0f0;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ Service Mapper Visualizer</h1>
+        
+        <div class="controls">
+            <div class="control-section">
+                <h3>Add New Service</h3>
+                <div class="form-group">
+                    <input type="text" id="serviceName" placeholder="Service Name (e.g., jira)">
+                    <input type="url" id="serviceUrl" placeholder="Service URL (e.g., https://jira.com)">
+                    <button onclick="addService()">Add Service</button>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Add Connection</h3>
+                <div class="form-group">
+                    <select id="sourceService">
+                        <option value="">Select Source Service</option>
+                    </select>
+                    <select id="targetService">
+                        <option value="">Select Target Service</option>
+                    </select>
+                    <button onclick="addConnection()">Add Connection</button>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Current Services</h3>
+                <div class="service-list" id="serviceList"></div>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="serviceCanvas" width="1360" height="600"></canvas>
+        </div>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <script>
+        const API_BASE = '/api';
+        const canvas = document.getElementById('serviceCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let services = [];
+        let connections = [];
+        let isDragging = false;
+        let draggedService = null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Initialize
+        async function init() {
+            await loadServices();
+            await loadConnections();
+            render();
+        }
+
+        // Load services from API
+        async function loadServices() {
+            try {
+                const response = await fetch(`${API_BASE}/services/`);
+                services = await response.json();
+                updateServiceSelects();
+                updateServiceList();
+            } catch (error) {
+                showMessage('Error loading services: ' + error.message, 'error');
+            }
+        }
+
+        // Load connections from API
+        async function loadConnections() {
+            try {
+                const response = await fetch(`${API_BASE}/connections/`);
+                connections = await response.json();
+            } catch (error) {
+                showMessage('Error loading connections: ' + error.message, 'error');
+            }
+        }
+
+        // Add new service
+        async function addService() {
+            const name = document.getElementById('serviceName').value.trim();
+            const url = document.getElementById('serviceUrl').value.trim();
+
+            if (!name || !url) {
+                showMessage('Please enter both service name and URL', 'error');
+                return;
+            }
+
+            try {
+                // Calculate random position if not specified
+                const x = Math.random() * (canvas.width - 100) + 50;
+                const y = Math.random() * (canvas.height - 100) + 50;
+
+                const response = await fetch(`${API_BASE}/services/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name, url, x_position: x, y_position: y })
+                });
+
+                if (response.ok) {
+                    showMessage(`Service "${name}" added successfully!`, 'success');
+                    document.getElementById('serviceName').value = '';
+                    document.getElementById('serviceUrl').value = '';
+                    await loadServices();
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding service: ' + error.message, 'error');
+            }
+        }
+
+        // Add new connection
+        async function addConnection() {
+            const sourceId = document.getElementById('sourceService').value;
+            const targetId = document.getElementById('targetService').value;
+
+            if (!sourceId || !targetId) {
+                showMessage('Please select both source and target services', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/connections/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ source: sourceId, target: targetId })
+                });
+
+                if (response.ok) {
+                    showMessage('Connection added successfully!', 'success');
+                    document.getElementById('sourceService').value = '';
+                    document.getElementById('targetService').value = '';
+                    await loadConnections();
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding connection: ' + error.message, 'error');
+            }
+        }
+
+        // Update service select dropdowns
+        function updateServiceSelects() {
+            const sourceSelect = document.getElementById('sourceService');
+            const targetSelect = document.getElementById('targetService');
+            
+            sourceSelect.innerHTML = '<option value="">Select Source Service</option>';
+            targetSelect.innerHTML = '<option value="">Select Target Service</option>';
+
+            services.forEach(service => {
+                sourceSelect.innerHTML += `<option value="${service.id}">${service.name}</option>`;
+                targetSelect.innerHTML += `<option value="${service.id}">${service.name}</option>`;
+            });
+        }
+
+        // Update service list display
+        function updateServiceList() {
+            const serviceList = document.getElementById('serviceList');
+            if (services.length === 0) {
+                serviceList.innerHTML = '<span class="service-badge">No services yet</span>';
+            } else {
+                serviceList.innerHTML = services.map(s => 
+                    `<span class="service-badge">${s.name}</span>`
+                ).join('');
+            }
+        }
+
+        // Render canvas
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw connections (green lines)
+            connections.forEach(connection => {
+                const source = services.find(s => s.id === connection.source);
+                const target = services.find(s => s.id === connection.target);
+
+                if (source && target) {
+                    drawConnection(source, target);
+                }
+            });
+
+            // Draw services
+            services.forEach(service => {
+                drawService(service);
+            });
+        }
+
+        // Draw a connection line
+        function drawConnection(source, target) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 3;
+            ctx.moveTo(source.x_position, source.y_position);
+            ctx.lineTo(target.x_position, target.y_position);
+            ctx.stroke();
+
+            // Draw arrowhead
+            const angle = Math.atan2(target.y_position - source.y_position, target.x_position - source.x_position);
+            const arrowLength = 15;
+            const arrowAngle = Math.PI / 6;
+
+            ctx.beginPath();
+            ctx.moveTo(target.x_position, target.y_position);
+            ctx.lineTo(
+                target.x_position - arrowLength * Math.cos(angle - arrowAngle),
+                target.y_position - arrowLength * Math.sin(angle - arrowAngle)
+            );
+            ctx.moveTo(target.x_position, target.y_position);
+            ctx.lineTo(
+                target.x_position - arrowLength * Math.cos(angle + arrowAngle),
+                target.y_position - arrowLength * Math.sin(angle + arrowAngle)
+            );
+            ctx.stroke();
+        }
+
+        // Draw a service node
+        function drawService(service) {
+            const radius = 40;
+            const x = service.x_position;
+            const y = service.y_position;
+
+            // Draw circle
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#667eea';
+            ctx.fill();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw service name
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(service.name, x, y);
+        }
+
+        // Get service at position
+        function getServiceAtPosition(x, y) {
+            const radius = 40;
+            return services.find(service => {
+                const dx = x - service.x_position;
+                const dy = y - service.y_position;
+                return Math.sqrt(dx * dx + dy * dy) <= radius;
+            });
+        }
+
+        // Mouse events
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const service = getServiceAtPosition(x, y);
+            if (service) {
+                draggedService = service;
+                offsetX = x - service.x_position;
+                offsetY = y - service.y_position;
+                isDragging = true;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging && draggedService) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                draggedService.x_position = x - offsetX;
+                draggedService.y_position = y - offsetY;
+                render();
+            }
+        });
+
+        canvas.addEventListener('mouseup', async (e) => {
+            if (isDragging && draggedService) {
+                // Update position in backend
+                try {
+                    await fetch(`${API_BASE}/services/${draggedService.id}/`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            x_position: draggedService.x_position,
+                            y_position: draggedService.y_position
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error updating service position:', error);
+                }
+            }
+            isDragging = false;
+            draggedService = null;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (!isDragging) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                const service = getServiceAtPosition(x, y);
+                if (service) {
+                    window.open(service.url, '_blank');
+                }
+            }
+        });
+
+        // Show message
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = `message ${type}`;
+            messageEl.style.display = 'block';
+
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>

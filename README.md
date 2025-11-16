@@ -75,7 +75,7 @@ http://localhost:8000/
 4. A green line with an arrow will appear showing the connection
 
 #### Interacting with Services
-- **Click** on a service node to open its URL in a new tab
+- **Click** on a service node to highlight it and recursively show connected services (use controls to pick direction/depth); **double-click** to open its URL in a new tab
 - **Drag** a service node to reposition it on the canvas
 - Service positions are automatically saved
 

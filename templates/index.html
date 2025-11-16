@@ -180,6 +180,27 @@
                 <h3>Current Services</h3>
                 <div class="service-list" id="serviceList"></div>
             </div>
+
+            <div class="control-section">
+                <h3>Explore Graph</h3>
+                <div class="form-group">
+                    <select id="traversalMode">
+                        <option value="out" selected>Outgoing</option>
+                        <option value="in">Incoming</option>
+                        <option value="both">Both</option>
+                    </select>
+                    <select id="depthLimit">
+                        <option value="all" selected>All depths</option>
+                        <option value="1">1 hop</option>
+                        <option value="2">2 hops</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Selection Details</h3>
+                <div id="selectionInfo"><em>No selection. Click a service to explore its graph.</em></div>
+            </div>
         </div>
 
         <div class="canvas-container">
@@ -200,6 +221,11 @@
         let draggedService = null;
         let offsetX = 0;
         let offsetY = 0;
+        let adjacencyOut = new Map();
+        let adjacencyIn = new Map();
+        let selectedServiceId = null;
+        let traversalMode = 'out';
+        let depthLimit = null;
 
         // Initialize
         async function init() {
@@ -225,9 +251,64 @@
             try {
                 const response = await fetch(`${API_BASE}/connections/`);
                 connections = await response.json();
+                buildGraph();
             } catch (error) {
                 showMessage('Error loading connections: ' + error.message, 'error');
             }
+        }
+
+        function buildGraph() {
+            adjacencyOut = new Map();
+            adjacencyIn = new Map();
+            services.forEach(s => { adjacencyOut.set(s.id, new Set()); adjacencyIn.set(s.id, new Set()); });
+            connections.forEach(c => {
+                if (adjacencyOut.has(c.source)) adjacencyOut.get(c.source).add(c.target);
+                if (adjacencyIn.has(c.target)) adjacencyIn.get(c.target).add(c.source);
+            });
+        }
+
+        function getReachable(startId, mode = 'out', depth = null) {
+            const visitedOut = new Set([startId]);
+            const visitedIn = new Set([startId]);
+            const queue = [];
+            if (mode !== 'in') queue.push({ id: startId, d: 0, dir: 'out' });
+            if (mode !== 'out') queue.push({ id: startId, d: 0, dir: 'in' });
+            const seen = new Set([`out:${startId}`, `in:${startId}`]);
+
+            while (queue.length) {
+                const { id, d, dir } = queue.shift();
+                if (depth !== null && d >= depth) continue;
+                const neighbors = dir === 'out' ? (adjacencyOut.get(id) || new Set()) : (adjacencyIn.get(id) || new Set());
+                neighbors.forEach(nb => {
+                    const key = `${dir}:${nb}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        if (dir === 'out') visitedOut.add(nb); else visitedIn.add(nb);
+                        queue.push({ id: nb, d: d + 1, dir });
+                    }
+                });
+            }
+            const allSet = new Set([...visitedOut, ...visitedIn]);
+            return { outSet: visitedOut, inSet: visitedIn, allSet };
+        }
+
+        function updateSelectionInfo(reach = null) {
+            const el = document.getElementById('selectionInfo');
+            if (!selectedServiceId) {
+                el.innerHTML = '<em>No selection. Click a service to explore its graph.</em>';
+                return;
+            }
+            const selected = services.find(s => s.id === selectedServiceId);
+            const directOut = connections.filter(c => c.source === selectedServiceId).map(c => services.find(s => s.id === c.target)?.name).filter(Boolean);
+            const directIn = connections.filter(c => c.target === selectedServiceId).map(c => services.find(s => s.id === c.source)?.name).filter(Boolean);
+            const outList = [...(reach?.outSet || [])].filter(id => id !== selectedServiceId).map(id => services.find(s => s.id === id)?.name).filter(Boolean);
+            const inList = [...(reach?.inSet || [])].filter(id => id !== selectedServiceId).map(id => services.find(s => s.id === id)?.name).filter(Boolean);
+            el.innerHTML = `
+                <div><strong>Selected:</strong> ${selected?.name}</div>
+                <div style="margin-top:8px;"><strong>Direct Outgoing:</strong> ${directOut.length ? directOut.join(', ') : 'None'}</div>
+                <div><strong>Direct Incoming:</strong> ${directIn.length ? directIn.join(', ') : 'None'}</div>
+                <div style="margin-top:8px;"><strong>Reachable (${traversalMode}):</strong> ${outList.length || inList.length ? (traversalMode==='in'? inList.join(', ') : traversalMode==='out'? outList.join(', ') : [...new Set([...outList, ...inList])].join(', ')) : 'None'}</div>
+            `;
         }
 
         // Add new service
@@ -332,26 +413,37 @@
         function render() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw connections (green lines)
+            const reach = selectedServiceId ? getReachable(selectedServiceId, traversalMode, depthLimit) : null;
+
+            // Draw connections with highlighting
             connections.forEach(connection => {
                 const source = services.find(s => s.id === connection.source);
                 const target = services.find(s => s.id === connection.target);
-
                 if (source && target) {
-                    drawConnection(source, target);
+                    let color = '#00ff00';
+                    if (reach) {
+                        color = (reach.allSet.has(source.id) && reach.allSet.has(target.id)) ? '#00ff66' : '#cccccc';
+                    }
+                    drawConnection(source, target, color);
                 }
             });
 
-            // Draw services
+            // Draw services with highlighting
             services.forEach(service => {
-                drawService(service);
+                let color = '#667eea';
+                if (selectedServiceId) {
+                    if (service.id === selectedServiceId) color = '#ff5722';
+                    else if (reach && reach.allSet.has(service.id)) color = '#ffd54f';
+                    else color = '#cfd8dc';
+                }
+                drawService(service, color);
             });
         }
 
         // Draw a connection line
-        function drawConnection(source, target) {
+        function drawConnection(source, target, color = '#00ff00') {
             ctx.beginPath();
-            ctx.strokeStyle = '#00ff00';
+            ctx.strokeStyle = color;
             ctx.lineWidth = 3;
             ctx.moveTo(source.x_position, source.y_position);
             ctx.lineTo(target.x_position, target.y_position);
@@ -377,7 +469,7 @@
         }
 
         // Draw a service node
-        function drawService(service) {
+        function drawService(service, color = '#667eea') {
             const radius = 40;
             const x = service.x_position;
             const y = service.y_position;
@@ -385,7 +477,7 @@
             // Draw circle
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = '#667eea';
+            ctx.fillStyle = color;
             ctx.fill();
             ctx.strokeStyle = '#333';
             ctx.lineWidth = 2;
@@ -463,12 +555,26 @@
                 const rect = canvas.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
-
                 const service = getServiceAtPosition(x, y);
                 if (service) {
-                    window.open(service.url, '_blank');
+                    selectedServiceId = service.id;
+                    const reach = getReachable(selectedServiceId, traversalMode, depthLimit);
+                    updateSelectionInfo(reach);
+                    render();
+                } else {
+                    selectedServiceId = null;
+                    updateSelectionInfo(null);
+                    render();
                 }
             }
+        });
+
+        canvas.addEventListener('dblclick', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const service = getServiceAtPosition(x, y);
+            if (service) window.open(service.url, '_blank');
         });
 
         // Show message
@@ -481,6 +587,25 @@
             setTimeout(() => {
                 messageEl.style.display = 'none';
             }, 3000);
+        }
+
+        // Hook controls
+        const traversalSelect = document.getElementById('traversalMode');
+        const depthSelect = document.getElementById('depthLimit');
+        if (traversalSelect) {
+            traversalSelect.addEventListener('change', (e) => {
+                traversalMode = e.target.value;
+                if (selectedServiceId) updateSelectionInfo(getReachable(selectedServiceId, traversalMode, depthLimit));
+                render();
+            });
+        }
+        if (depthSelect) {
+            depthSelect.addEventListener('change', (e) => {
+                const val = e.target.value;
+                depthLimit = (val === 'all') ? null : parseInt(val, 10);
+                if (selectedServiceId) updateSelectionInfo(getReachable(selectedServiceId, traversalMode, depthLimit));
+                render();
+            });
         }
 
         // Initialize on page load

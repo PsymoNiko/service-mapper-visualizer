@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (ServiceViewSet, ConnectionViewSet, index, ServerViewSet, 
-                    ServerConnectionViewSet, ServiceStackViewSet, ContainerServiceViewSet)
+                    ServerConnectionViewSet, ServiceStackViewSet, ContainerServiceViewSet, server_map)
 
 router = DefaultRouter()
 # New hierarchical endpoints
@@ -16,5 +16,6 @@ router.register(r'connections', ConnectionViewSet)
 
 urlpatterns = [
     path('', index, name='index'),
+    path('servers/', server_map, name='server_map'),
     path('api/', include(router.urls)),
 ]

@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Infrastructure Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .breadcrumb {
+            background: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .breadcrumb a {
+            color: #667eea;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .breadcrumb span {
+            margin: 0 5px;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-section {
+            margin-bottom: 20px;
+        }
+
+        .control-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-section h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .form-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        input, select, button, textarea {
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        input, select, textarea {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        textarea {
+            min-height: 100px;
+            font-family: monospace;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button.secondary {
+            background: #6c757d;
+        }
+
+        button.secondary:hover {
+            background: #5a6268;
+        }
+
+        .canvas-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        #visualCanvas {
+            display: block;
+            cursor: grab;
+        }
+
+        #visualCanvas:active {
+            cursor: grabbing;
+        }
+
+        .message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 1000;
+            max-width: 400px;
+        }
+
+        .message.success {
+            border-left: 4px solid #00ff00;
+        }
+
+        .message.error {
+            border-left: 4px solid #ff0000;
+        }
+
+        .info-panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .info-panel h4 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .info-item {
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #e9ecef;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        .badge.healthy {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge.unhealthy {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ Server Infrastructure Visualizer</h1>
+        
+        <div class="breadcrumb" id="breadcrumb">
+            <a onclick="navigateToLevel(0)">Servers</a>
+        </div>
+
+        <div class="controls" id="level0Controls">
+            <div class="control-section">
+                <h3>Add New Server</h3>
+                <div class="form-group">
+                    <input type="text" id="serverName" placeholder="Server Name (e.g., prod-server-01)">
+                    <input type="text" id="serverIP" placeholder="IP Address (e.g., 192.168.1.10)">
+                    <input type="text" id="serverDescription" placeholder="Description">
+                    <button onclick="addServer()">Add Server</button>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Add Server Connection</h3>
+                <div class="form-group">
+                    <select id="sourceServer">
+                        <option value="">Select Source Server</option>
+                    </select>
+                    <select id="targetServer">
+                        <option value="">Select Target Server</option>
+                    </select>
+                    <label>
+                        <input type="checkbox" id="isHealthy" checked> Healthy (Green)
+                    </label>
+                    <button onclick="addServerConnection()">Add Connection</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls hidden" id="level1Controls">
+            <div class="control-section">
+                <h3>Add Service Stack</h3>
+                <div class="form-group">
+                    <input type="text" id="stackName" placeholder="Stack Name (e.g., chat-app)">
+                    <input type="url" id="stackUrl" placeholder="URL (e.g., https://chat.example.com)">
+                    <button onclick="addStack()">Add Stack</button>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>Upload Docker Compose</h3>
+                <div class="form-group">
+                    <select id="stackSelect">
+                        <option value="">Select Stack</option>
+                    </select>
+                    <textarea id="dockerCompose" placeholder="Paste docker-compose.yml content here..."></textarea>
+                </div>
+                <button onclick="parseDockerCompose()">Parse & Load Services</button>
+            </div>
+        </div>
+
+        <div class="controls hidden" id="level2Controls">
+            <div class="control-section">
+                <h3>Container Services</h3>
+                <div id="serviceDetails" class="info-panel"></div>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="visualCanvas" width="1360" height="600"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-section">
+                <h3>Selection Details</h3>
+                <div id="selectionInfo" class="info-panel">
+                    <em>Click on a server to view its details and service stacks.</em>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <script>
+        const API_BASE = '/api';
+        const canvas = document.getElementById('visualCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let currentLevel = 0; // 0: Servers, 1: Stacks, 2: Container Services
+        let currentServerId = null;
+        let currentStackId = null;
+        
+        let servers = [];
+        let serverConnections = [];
+        let stacks = [];
+        let containerServices = [];
+        
+        let isDragging = false;
+        let draggedItem = null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Initialize
+        async function init() {
+            await loadServers();
+            await loadServerConnections();
+            render();
+        }
+
+        // Navigation
+        function navigateToLevel(level, serverId = null, stackId = null) {
+            currentLevel = level;
+            currentServerId = serverId;
+            currentStackId = stackId;
+            
+            // Hide all control panels
+            document.getElementById('level0Controls').classList.add('hidden');
+            document.getElementById('level1Controls').classList.add('hidden');
+            document.getElementById('level2Controls').classList.add('hidden');
+            
+            // Update breadcrumb
+            updateBreadcrumb();
+            
+            // Show appropriate controls and load data
+            if (level === 0) {
+                document.getElementById('level0Controls').classList.remove('hidden');
+                loadServers().then(() => loadServerConnections()).then(() => render());
+            } else if (level === 1 && serverId) {
+                document.getElementById('level1Controls').classList.remove('hidden');
+                loadStacks(serverId).then(() => render());
+            } else if (level === 2 && stackId) {
+                document.getElementById('level2Controls').classList.remove('hidden');
+                loadContainerServices(stackId).then(() => render());
+            }
+        }
+
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            let html = '<a onclick="navigateToLevel(0)">Servers</a>';
+            
+            if (currentLevel >= 1 && currentServerId) {
+                const server = servers.find(s => s.id === currentServerId);
+                html += ` <span>></span> <a onclick="navigateToLevel(1, ${currentServerId})">${server ? server.name : 'Server'}</a>`;
+            }
+            
+            if (currentLevel >= 2 && currentStackId) {
+                const stack = stacks.find(s => s.id === currentStackId);
+                html += ` <span>></span> <a onclick="navigateToLevel(2, ${currentServerId}, ${currentStackId})">${stack ? stack.name : 'Stack'}</a>`;
+            }
+            
+            breadcrumb.innerHTML = html;
+        }
+
+        // API calls - Servers
+        async function loadServers() {
+            try {
+                const response = await fetch(`${API_BASE}/servers/`);
+                servers = await response.json();
+                updateServerSelects();
+            } catch (error) {
+                showMessage('Error loading servers: ' + error.message, 'error');
+            }
+        }
+
+        async function loadServerConnections() {
+            try {
+                const response = await fetch(`${API_BASE}/server-connections/`);
+                serverConnections = await response.json();
+            } catch (error) {
+                showMessage('Error loading server connections: ' + error.message, 'error');
+            }
+        }
+
+        async function addServer() {
+            const name = document.getElementById('serverName').value.trim();
+            const ip = document.getElementById('serverIP').value.trim();
+            const description = document.getElementById('serverDescription').value.trim();
+
+            if (!name || !ip) {
+                showMessage('Please enter server name and IP address', 'error');
+                return;
+            }
+
+            try {
+                const x = Math.random() * (canvas.width - 100) + 50;
+                const y = Math.random() * (canvas.height - 100) + 50;
+
+                const response = await fetch(`${API_BASE}/servers/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, ip_address: ip, description, x_position: x, y_position: y })
+                });
+
+                if (response.ok) {
+                    showMessage(`Server "${name}" added successfully!`, 'success');
+                    document.getElementById('serverName').value = '';
+                    document.getElementById('serverIP').value = '';
+                    document.getElementById('serverDescription').value = '';
+                    await loadServers();
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding server: ' + error.message, 'error');
+            }
+        }
+
+        async function addServerConnection() {
+            const sourceId = document.getElementById('sourceServer').value;
+            const targetId = document.getElementById('targetServer').value;
+            const isHealthy = document.getElementById('isHealthy').checked;
+
+            if (!sourceId || !targetId) {
+                showMessage('Please select both source and target servers', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/server-connections/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: sourceId, target: targetId, is_healthy: isHealthy })
+                });
+
+                if (response.ok) {
+                    showMessage('Server connection added successfully!', 'success');
+                    document.getElementById('sourceServer').value = '';
+                    document.getElementById('targetServer').value = '';
+                    await loadServerConnections();
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding connection: ' + error.message, 'error');
+            }
+        }
+
+        function updateServerSelects() {
+            const sourceSelect = document.getElementById('sourceServer');
+            const targetSelect = document.getElementById('targetServer');
+            
+            sourceSelect.innerHTML = '<option value="">Select Source Server</option>';
+            targetSelect.innerHTML = '<option value="">Select Target Server</option>';
+
+            servers.forEach(server => {
+                sourceSelect.innerHTML += `<option value="${server.id}">${server.name} (${server.ip_address})</option>`;
+                targetSelect.innerHTML += `<option value="${server.id}">${server.name} (${server.ip_address})</option>`;
+            });
+        }
+
+        // API calls - Stacks
+        async function loadStacks(serverId) {
+            try {
+                const response = await fetch(`${API_BASE}/stacks/?server=${serverId}`);
+                const allStacks = await response.json();
+                stacks = allStacks.filter(s => s.server === serverId);
+                updateStackSelect();
+            } catch (error) {
+                showMessage('Error loading stacks: ' + error.message, 'error');
+            }
+        }
+
+        async function addStack() {
+            const name = document.getElementById('stackName').value.trim();
+            const url = document.getElementById('stackUrl').value.trim();
+
+            if (!name) {
+                showMessage('Please enter stack name', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/stacks/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server: currentServerId, name, url, description: '' })
+                });
+
+                if (response.ok) {
+                    showMessage(`Stack "${name}" added successfully!`, 'success');
+                    document.getElementById('stackName').value = '';
+                    document.getElementById('stackUrl').value = '';
+                    await loadStacks(currentServerId);
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding stack: ' + error.message, 'error');
+            }
+        }
+
+        async function parseDockerCompose() {
+            const stackId = document.getElementById('stackSelect').value;
+            const composeContent = document.getElementById('dockerCompose').value.trim();
+
+            if (!stackId || !composeContent) {
+                showMessage('Please select a stack and provide docker-compose content', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/stacks/${stackId}/parse_compose/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ docker_compose_content: composeContent })
+                });
+
+                if (response.ok) {
+                    showMessage('Docker compose parsed successfully!', 'success');
+                    document.getElementById('dockerCompose').value = '';
+                    await loadStacks(currentServerId);
+                    render();
+                } else {
+                    const error = await response.json();
+                    showMessage('Error: ' + JSON.stringify(error), 'error');
+                }
+            } catch (error) {
+                showMessage('Error parsing docker compose: ' + error.message, 'error');
+            }
+        }
+
+        function updateStackSelect() {
+            const stackSelect = document.getElementById('stackSelect');
+            stackSelect.innerHTML = '<option value="">Select Stack</option>';
+
+            stacks.forEach(stack => {
+                stackSelect.innerHTML += `<option value="${stack.id}">${stack.name}</option>`;
+            });
+        }
+
+        // API calls - Container Services
+        async function loadContainerServices(stackId) {
+            try {
+                const response = await fetch(`${API_BASE}/stacks/${stackId}/`);
+                const stackData = await response.json();
+                containerServices = stackData.container_services || [];
+                displayContainerServices();
+            } catch (error) {
+                showMessage('Error loading container services: ' + error.message, 'error');
+            }
+        }
+
+        function displayContainerServices() {
+            const detailsDiv = document.getElementById('serviceDetails');
+            
+            if (containerServices.length === 0) {
+                detailsDiv.innerHTML = '<p>No container services found. Upload a docker-compose.yml file to add services.</p>';
+                return;
+            }
+
+            // Group services by network
+            const networkGroups = {};
+            containerServices.forEach(service => {
+                service.networks.forEach(network => {
+                    if (!networkGroups[network]) {
+                        networkGroups[network] = [];
+                    }
+                    networkGroups[network].push(service);
+                });
+            });
+
+            let html = '';
+            for (const [network, services] of Object.entries(networkGroups)) {
+                html += `<h4>Network: ${network}</h4>`;
+                services.forEach(service => {
+                    const ports = service.ports.map(p => `<span class="badge">${p}</span>`).join('');
+                    html += `
+                        <div class="info-item">
+                            <strong>${service.service_name}</strong> 
+                            ${service.image ? `<br>Image: ${service.image}` : ''}
+                            ${ports ? `<br>Ports: ${ports}` : ''}
+                        </div>
+                    `;
+                });
+            }
+
+            detailsDiv.innerHTML = html;
+        }
+
+        // Rendering
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (currentLevel === 0) {
+                renderServers();
+            } else if (currentLevel === 1) {
+                renderStacks();
+            } else if (currentLevel === 2) {
+                renderContainerServices();
+            }
+        }
+
+        function renderServers() {
+            // Draw connections first
+            serverConnections.forEach(conn => {
+                const source = servers.find(s => s.id === conn.source);
+                const target = servers.find(s => s.id === conn.target);
+                if (source && target) {
+                    const color = conn.is_healthy ? '#00ff00' : '#ff0000';
+                    drawArrow(source, target, color);
+                }
+            });
+
+            // Draw servers
+            servers.forEach(server => {
+                drawServer(server);
+            });
+        }
+
+        function renderStacks() {
+            // Position stacks in a grid
+            stacks.forEach((stack, index) => {
+                const x = 100 + (index % 4) * 300;
+                const y = 100 + Math.floor(index / 4) * 150;
+                drawStack(stack, x, y);
+            });
+        }
+
+        function renderContainerServices() {
+            // Group by network and visualize
+            const networkGroups = {};
+            containerServices.forEach(service => {
+                service.networks.forEach(network => {
+                    if (!networkGroups[network]) {
+                        networkGroups[network] = [];
+                    }
+                    networkGroups[network].push(service);
+                });
+            });
+
+            let yOffset = 80;
+            for (const [network, services] of Object.entries(networkGroups)) {
+                // Draw network label
+                ctx.fillStyle = '#333';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(`Network: ${network}`, 50, yOffset);
+                
+                yOffset += 40;
+                
+                // Draw services in this network
+                services.forEach((service, index) => {
+                    const x = 100 + (index % 5) * 250;
+                    const y = yOffset + Math.floor(index / 5) * 100;
+                    drawContainerService(service, x, y);
+                });
+                
+                yOffset += 100 + Math.floor(services.length / 5) * 100;
+            }
+        }
+
+        function drawServer(server) {
+            const radius = 50;
+            const x = server.x_position || 100;
+            const y = server.y_position || 100;
+
+            // Draw circle
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#667eea';
+            ctx.fill();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Draw server name
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(server.name, x, y - 5);
+            
+            // Draw IP
+            ctx.font = '12px Arial';
+            ctx.fillText(server.ip_address, x, y + 10);
+        }
+
+        function drawStack(stack, x, y) {
+            const width = 200;
+            const height = 80;
+
+            // Draw rectangle
+            ctx.fillStyle = '#ffd54f';
+            ctx.fillRect(x - width/2, y - height/2, width, height);
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x - width/2, y - height/2, width, height);
+
+            // Draw stack name
+            ctx.fillStyle = '#333';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(stack.name, x, y);
+            
+            // Draw service count if available
+            if (stack.container_services) {
+                ctx.font = '12px Arial';
+                ctx.fillText(`${stack.container_services.length} services`, x, y + 20);
+            }
+        }
+
+        function drawContainerService(service, x, y) {
+            const width = 180;
+            const height = 60;
+
+            // Draw rectangle
+            ctx.fillStyle = '#a5d6a7';
+            ctx.fillRect(x - width/2, y - height/2, width, height);
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x - width/2, y - height/2, width, height);
+
+            // Draw service name
+            ctx.fillStyle = '#1b5e20';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Truncate long names
+            let displayName = service.service_name;
+            if (displayName.length > 20) {
+                displayName = displayName.substring(0, 17) + '...';
+            }
+            ctx.fillText(displayName, x, y - 10);
+            
+            // Draw first port if available
+            if (service.ports && service.ports.length > 0) {
+                ctx.font = '11px Arial';
+                const portText = service.ports[0].toString();
+                ctx.fillText(portText, x, y + 10);
+            }
+        }
+
+        function drawArrow(source, target, color = '#00ff00') {
+            const sx = source.x_position || 100;
+            const sy = source.y_position || 100;
+            const tx = target.x_position || 200;
+            const ty = target.y_position || 200;
+
+            // Draw line
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+
+            // Draw arrowhead
+            const angle = Math.atan2(ty - sy, tx - sx);
+            const arrowLength = 20;
+            const arrowAngle = Math.PI / 6;
+
+            ctx.beginPath();
+            ctx.fillStyle = color;
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(
+                tx - arrowLength * Math.cos(angle - arrowAngle),
+                ty - arrowLength * Math.sin(angle - arrowAngle)
+            );
+            ctx.lineTo(
+                tx - arrowLength * Math.cos(angle + arrowAngle),
+                ty - arrowLength * Math.sin(angle + arrowAngle)
+            );
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Mouse events
+        function getItemAtPosition(x, y) {
+            if (currentLevel === 0) {
+                const radius = 50;
+                return servers.find(server => {
+                    const sx = server.x_position || 100;
+                    const sy = server.y_position || 100;
+                    const dx = x - sx;
+                    const dy = y - sy;
+                    return Math.sqrt(dx * dx + dy * dy) <= radius;
+                });
+            } else if (currentLevel === 1) {
+                return stacks.find((stack, index) => {
+                    const sx = 100 + (index % 4) * 300;
+                    const sy = 100 + Math.floor(index / 4) * 150;
+                    return x >= sx - 100 && x <= sx + 100 && y >= sy - 40 && y <= sy + 40;
+                });
+            }
+            return null;
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const item = getItemAtPosition(x, y);
+            if (item && currentLevel === 0) {
+                draggedItem = item;
+                offsetX = x - (item.x_position || 100);
+                offsetY = y - (item.y_position || 100);
+                isDragging = true;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging && draggedItem && currentLevel === 0) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                draggedItem.x_position = x - offsetX;
+                draggedItem.y_position = y - offsetY;
+                render();
+            }
+        });
+
+        canvas.addEventListener('mouseup', async (e) => {
+            if (isDragging && draggedItem && currentLevel === 0) {
+                // Update position in backend
+                try {
+                    await fetch(`${API_BASE}/servers/${draggedItem.id}/`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            x_position: draggedItem.x_position,
+                            y_position: draggedItem.y_position
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error updating position:', error);
+                }
+            }
+            isDragging = false;
+            draggedItem = null;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (!isDragging) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const item = getItemAtPosition(x, y);
+                
+                if (item) {
+                    if (currentLevel === 0) {
+                        // Navigate to server's stacks
+                        navigateToLevel(1, item.id);
+                        
+                        // Update selection info
+                        const connections = serverConnections.filter(c => c.source === item.id || c.target === item.id);
+                        const outgoing = connections.filter(c => c.source === item.id);
+                        const incoming = connections.filter(c => c.target === item.id);
+                        
+                        const infoDiv = document.getElementById('selectionInfo');
+                        infoDiv.innerHTML = `
+                            <h4>Server: ${item.name}</h4>
+                            <div class="info-item"><strong>IP:</strong> ${item.ip_address}</div>
+                            <div class="info-item"><strong>Description:</strong> ${item.description || 'N/A'}</div>
+                            <div class="info-item"><strong>Outgoing connections:</strong> ${outgoing.length}</div>
+                            <div class="info-item"><strong>Incoming connections:</strong> ${incoming.length}</div>
+                        `;
+                    } else if (currentLevel === 1) {
+                        // Navigate to stack's container services
+                        navigateToLevel(2, currentServerId, item.id);
+                    }
+                }
+            }
+        });
+
+        // Show message
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = `message ${type}`;
+            messageEl.style.display = 'block';
+
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 4000);
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>

@@ -11,8 +11,13 @@ import yaml
 # Create your views here.
 
 def index(request):
-    """Render the main visualization page"""
+    """Render the main visualization page (legacy)"""
     return render(request, 'index.html')
+
+
+def server_map(request):
+    """Render the hierarchical server map visualization"""
+    return render(request, 'server_map.html')
 
 
 # New viewsets for hierarchical model
@@ -49,6 +54,14 @@ class ServiceStackViewSet(viewsets.ModelViewSet):
     """
     queryset = ServiceStack.objects.all()
     serializer_class = ServiceStackSerializer
+
+    def get_queryset(self):
+        """Allow filtering by server"""
+        queryset = ServiceStack.objects.all()
+        server_id = self.request.query_params.get('server', None)
+        if server_id is not None:
+            queryset = queryset.filter(server_id=server_id)
+        return queryset
 
     @action(detail=True, methods=['post'])
     def parse_compose(self, request, pk=None):

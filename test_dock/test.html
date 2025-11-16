@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Server Monitoring</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .server-node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .server-node:hover {
+            filter: brightness(1.1);
+        }
+        .connection {
+            stroke: green;
+            stroke-width: 3;
+            marker-end: url(#arrowhead);
+        }
+        .connection.unreachable {
+            stroke: red;
+        }
+        .server-info {
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .service-panel {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: white;
+        }
+        .service-item {
+            margin: 10px 0;
+            padding: 10px;
+            border-left: 4px solid #007bff;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div id="network-container"></div>
+    <div id="service-panel" class="service-panel" style="display: none;"></div>
+
+    <script>
+        // Server data with connections
+        const servers = [
+            {
+                id: "server1",
+                name: "Web Server",
+                ip: "192.168.1.10",
+                description: "Main web application server hosting customer-facing applications",
+                connections: ["server2"],
+                status: "healthy"
+            },
+            {
+                id: "server2",
+                name: "Database Server",
+                ip: "192.168.1.11",
+                description: "Primary database server handling all data operations",
+                connections: ["server3"],
+                status: "healthy"
+            },
+            {
+                id: "server3",
+                name: "Backend Server",
+                ip: "192.168.1.12",
+                description: "Backend processing and API services",
+                connections: ["server1", "server2"],
+                status: "healthy"
+            }
+        ];
+
+        // Docker compose data for each server
+        const serverServices = {
+            "server1": {
+                productName: "Chat Application",
+                productUrl: "https://chat.example.com",
+                compose: {
+                    services: {
+                        chat_nginx: {
+                            image: "nginx:latest",
+                            ports: ["8080:80", "443:443"],
+                            volumes: [
+                                "./nginx.conf:/etc/nginx/nginx.conf",
+                                "./staticfiles:/code/static"
+                            ],
+                            depends_on: ["django"],
+                            networks: ["web_chat"]
+                        },
+                        django: {
+                            container_name: "django-chat-backend",
+                            build: ".",
+                            ports: ["8000:8000"],
+                            volumes: [
+                                "./chat:/code/chat",
+                                "./core:/code/core",
+                                "./staticfiles:/code/static",
+                                "./.env:/code/.env"
+                            ],
+                            env_file: "./.env",
+                            depends_on: ["chat_redis", "chat_postgres"],
+                            networks: ["web_chat"]
+                        }
+                    },
+                    networks: {
+                        web_chat: {}
+                    }
+                }
+            },
+            "server2": {
+                productName: "Database Services",
+                productUrl: "internal://database",
+                compose: {
+                    services: {
+                        chat_postgres: {
+                            image: "postgres:latest",
+                            container_name: "chat-develop-postgres-db-1",
+                            restart: "always",
+                            environment: {
+                                POSTGRES_USER: "devAdmin",
+                                POSTGRES_PASSWORD: "mysecretpassword"
+                            },
+                            ports: ["5861:5432"],
+                            volumes: ["postgres_data:/var/lib/postgresql/data"],
+                            networks: ["web_chat"]
+                        }
+                    },
+                    networks: {
+                        web_chat: {}
+                    }
+                }
+            },
+            "server3": {
+                productName: "Cache & Queue Services",
+                productUrl: "internal://cache",
+                compose: {
+                    services: {
+                        chat_redis: {
+                            image: "redis:latest",
+                            ports: ["6372:6379"],
+                            networks: ["web_chat"]
+                        }
+                    },
+                    networks: {
+                        web_chat: {}
+                    }
+                }
+            }
+        };
+
+        // Initialize network visualization
+        function initNetwork() {
+            const width = 800;
+            const height = 600;
+            const container = d3.select("#network-container");
+
+            const svg = container.append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            // Define arrow marker
+            svg.append("defs").append("marker")
+                .attr("id", "arrowhead")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 25)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", "green");
+
+            // Create force simulation
+            const simulation = d3.forceSimulation(servers)
+                .force("charge", d3.forceManyBody().strength(-1000))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("link", d3.forceLink().id(d => d.id).distance(150));
+
+            // Create links
+            const links = [];
+            servers.forEach(server => {
+                server.connections.forEach(targetId => {
+                    links.push({
+                        source: server.id,
+                        target: targetId,
+                        status: "healthy"
+                    });
+                });
+            });
+
+            simulation.force("link").links(links);
+
+            // Draw links
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(links)
+                .enter().append("line")
+                .attr("class", d => `connection ${d.status}`)
+                .attr("marker-end", "url(#arrowhead)");
+
+            // Draw nodes
+            const node = svg.append("g")
+                .selectAll("g")
+                .data(servers)
+                .enter().append("g")
+                .attr("class", "server-node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            // Server circles
+            node.append("circle")
+                .attr("r", 30)
+                .attr("fill", d => d.status === "healthy" ? "green" : "red")
+                .on("click", function(event, d) {
+                    showServices(d.id);
+                });
+
+            // Server labels
+            node.append("text")
+                .text(d => d.name)
+                .attr("text-anchor", "middle")
+                .attr("dy", 5)
+                .attr("fill", "white")
+                .style("font-weight", "bold");
+
+            // Server info tooltip
+            node.append("title")
+                .text(d => `${d.name}\nIP: ${d.ip}\n${d.description}`);
+
+            // Update positions
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        // Show services for selected server
+        function showServices(serverId) {
+            const panel = d3.select("#service-panel");
+            const services = serverServices[serverId];
+            
+            if (!services) return;
+
+            panel.style("display", "block");
+            
+            panel.html(`
+                <h3>${services.productName}</h3>
+                <p><strong>URL:</strong> ${services.productUrl}</p>
+                <p><strong>Server:</strong> ${servers.find(s => s.id === serverId).name}</p>
+                <div class="services-list">
+                    <h4>Services:</h4>
+                    ${Object.entries(services.compose.services).map(([name, config]) => `
+                        <div class="service-item">
+                            <h5>${name}</h5>
+                            <p><strong>Image:</strong> ${config.image || 'Custom build'}</p>
+                            ${config.ports ? `<p><strong>Ports:</strong> ${config.ports.join(', ')}</p>` : ''}
+                            ${config.depends_on ? `<p><strong>Depends on:</strong> ${config.depends_on.join(', ')}</p>` : ''}
+                            ${config.environment ? `<p><strong>Environment vars:</strong> ${Object.keys(config.environment).length} variables</p>` : ''}
+                            ${config.volumes ? `<p><strong>Volumes:</strong> ${config.volumes.length} volume mounts</p>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="network-info">
+                    <h4>Network:</h4>
+                    <p><strong>Network Name:</strong> ${Object.keys(services.compose.networks)[0]}</p>
+                </div>
+            `);
+        }
+
+        // Health check simulation
+        function simulateHealthCheck() {
+            // Randomly mark some connections as unreachable
+            d3.selectAll(".connection")
+                .each(function() {
+                    if (Math.random() < 0.3) { // 30% chance to be unreachable
+                        d3.select(this)
+                            .classed("unreachable", true)
+                            .attr("marker-end", "url(#arrowhead-red)");
+                    }
+                });
+
+            // Randomly mark some servers as unhealthy
+            servers.forEach(server => {
+                if (Math.random() < 0.2) { // 20% chance to be unhealthy
+                    server.status = "unhealthy";
+                }
+            });
+
+            // Update server nodes color
+            d3.selectAll(".server-node circle")
+                .attr("fill", d => d.status === "healthy" ? "green" : "red");
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initNetwork();
+            
+            // Simulate health checks every 10 seconds
+            setInterval(simulateHealthCheck, 10000);
+        });
+    </script>
+</body>
+</html>

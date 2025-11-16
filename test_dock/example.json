@@ -1,0 +1,112 @@
+{
+  "servers": [
+    {
+      "name": "server-1",
+      "ip": "10.0.0.1",
+      "description": "Main backend server. Can access server-2 only.",
+      "reachability": {
+        "status": "green",
+        "can_access": [
+          { "target": "server-2", "status": "green" }
+        ],
+        "cannot_access": [
+          { "target": "server-3", "status": "red" }
+        ]
+      },
+      "connections": [
+        { "from": "server-1", "to": "server-2", "direction": "outbound" }
+      ],
+      "products": [
+        {
+          "product_name": "chat_stack",
+          "product_url": "http://10.0.0.1:8080",
+          "network": "web_chat",
+          "services": [
+            {
+              "name": "chat_nginx",
+              "ports": ["8080:80", "443:443"],
+              "mapped_services": ["chat_nginx:8080"],
+              "image": "nginx:latest",
+              "volumes": [
+                "./nginx.conf:/etc/nginx/nginx.conf",
+                "./staticfiles:/code/static",
+                "/home/me/self-signed/fullchain.pem:/etc/ssl/certs/fullchain.pem",
+                "/home/me/self-signed/privkey.pem:/etc/ssl/private/privkey.pem"
+              ],
+              "depends_on": ["django"]
+            },
+            {
+              "name": "django",
+              "ports": ["8000:8000"],
+              "mapped_services": ["django:8000"],
+              "build": ".",
+              "volumes": [
+                "./chat:/code/chat",
+                "./core:/code/core",
+                "./staticfiles:/code/static",
+                ".env:/code/.env"
+              ],
+              "env_file": ".env",
+              "depends_on": ["chat_redis", "chat_postgres"]
+            },
+            {
+              "name": "chat_redis",
+              "ports": ["6372:6379"],
+              "mapped_services": ["chat_redis:6372"],
+              "image": "redis:latest"
+            },
+            {
+              "name": "chat_postgres",
+              "ports": ["5861:5432"],
+              "mapped_services": ["chat_postgres:5861"],
+              "image": "postgres:latest",
+              "environment": {
+                "POSTGRES_USER": "devAdmin",
+                "POSTGRES_PASSWORD": "mysecretpassword"
+              },
+              "volumes": [
+                "postgres_data:/var/lib/postgresql/data"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "server-2",
+      "ip": "10.0.0.2",
+      "description": "Middle relay server. Can access server-3 but not server-1.",
+      "reachability": {
+        "status": "green",
+        "can_access": [
+          { "target": "server-3", "status": "green" }
+        ],
+        "cannot_access": [
+          { "target": "server-1", "status": "red" }
+        ]
+      },
+      "connections": [
+        { "from": "server-2", "to": "server-3", "direction": "outbound" }
+      ],
+      "products": []
+    },
+    {
+      "name": "server-3",
+      "ip": "10.0.0.3",
+      "description": "Analytics server. Can access server-1 and server-2.",
+      "reachability": {
+        "status": "green",
+        "can_access": [
+          { "target": "server-1", "status": "green" },
+          { "target": "server-2", "status": "green" }
+        ]
+      },
+      "connections": [
+        { "from": "server-3", "to": "server-1", "direction": "outbound" },
+        { "from": "server-3", "to": "server-2", "direction": "outbound" }
+      ],
+      "products": []
+    }
+  ]
+}
+
